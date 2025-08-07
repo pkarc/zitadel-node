@@ -1,5 +1,6 @@
 import { importPKCS8, SignJWT } from 'jose';
 import NodeRSA from 'node-rsa';
+import { Issuer } from 'openid-client';
 
 type ApplicationJson = {
   appId: string;
@@ -126,4 +127,55 @@ export class Application {
       .setSubject(this.clientId)
       .sign(key);
   }
+
+    /**
+    * Introspect token to authenticate a user to a given backend
+    * 
+    * Generate a signed jwt and add it to the request
+    * Add client assertion type to the request: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+    * Add given token to the request
+    * Make the request to the introspection endpoint
+    *    
+    * @param token The token to introspect.
+    * @param audience The audience to use in the introspection request.
+    *
+    * @returns The introspection response as a json object.
+    *
+    */
+    public async introspectToken(token: string, audience: string): Promise<any> {
+        const { default: axios } = await import('axios');
+
+        const issuer = await Issuer.discover(audience);
+
+        const introspectionEndpoint = typeof issuer.metadata.introspection_endpoint === 'string' ? issuer.metadata.introspection_endpoint : 'N/A'; 
+        
+        const jwt = await this.getSignedJwt(audience);
+
+        const data = {
+            client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+            client_assertion: jwt,
+            token,
+        }
+
+        const response = await axios.post(
+            introspectionEndpoint, 
+            new URLSearchParams(data),
+            { 
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                }
+            }
+        );
+
+        if (response.status > 299){
+            throw new Error(`Failed to introspect token: ${response.status}: ${response.statusText}`);
+        }
+
+        if (response.data.active === false){
+            throw new Error(`Token is not active`);
+        }
+
+        return response.data;
+    }
+
 }
